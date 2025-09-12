@@ -1,5 +1,5 @@
-const CACHE_NAME = 'autotradebot-v1';
-const API_CACHE = 'api-cache-v1';
+const CACHE_NAME = 'autotradebot-v2';
+const API_CACHE = 'api-cache-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -9,38 +9,60 @@ const APP_SHELL = [
   'https://cdn.tailwindcss.com',
   'https://s3.tradingview.com/tv.js'
 ];
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(c =>
-      c.addAll(APP_SHELL)
+
+// INSTALL: Precache app shell
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache =>
+      cache.addAll(APP_SHELL)
     )
   );
   self.skipWaiting();
 });
-self.addEventListener('activate', e => {
-  e.waitUntil(
+
+// ACTIVATE: Clean up old caches
+self.addEventListener('activate', event => {
+  event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k=>!k.startsWith('autotradebot-')&&!k.startsWith('api-cache')).map(k=>caches.delete(k)))
+      Promise.all(
+        keys
+          .filter(key => key !== CACHE_NAME && key !== API_CACHE)
+          .map(key => caches.delete(key))
+      )
     )
   );
   self.clients.claim();
 });
-self.addEventListener('fetch', e => {
-  const url = e.request.url;
+
+// FETCH: App shell = cache first, API = network first w/ fallback
+self.addEventListener('fetch', event => {
+  const url = event.request.url;
+
+  // Handle API/cache logic for CoinGecko and TradingView
   if (/coingecko\.com\/api|tradingview/i.test(url)) {
-    // network first, fallback to cache
-    e.respondWith(
-      fetch(e.request).then(resp => {
-        return caches.open(API_CACHE).then(c => { c.put(e.request, resp.clone()); return resp; });
-      }).catch(() => caches.open(API_CACHE).then(c=>c.match(e.request)))
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          return caches.open(API_CACHE).then(cache => {
+            cache.put(event.request, response.clone());
+            return response;
+          });
+        })
+        .catch(() => caches.open(API_CACHE).then(cache => cache.match(event.request)))
     );
-  } else if (APP_SHELL.some(path => url.includes(path))) {
-    // cache first
-    e.respondWith(
-      caches.match(e.request).then(resp => resp || fetch(e.request))
+    return;
+  }
+
+  // Serve app shell assets from cache first
+  if (APP_SHELL.some(path => url.endsWith(path) || url.includes(path))) {
+    event.respondWith(
+      caches.match(event.request).then(resp => resp || fetch(event.request))
     );
+    return;
   }
 });
-self.addEventListener('message', e => {
-  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+
+// Listen for skipWaiting message
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
