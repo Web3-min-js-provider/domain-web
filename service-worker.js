@@ -5,8 +5,9 @@ const APP_SHELL = [
   '/index.html',
   '/manifest.json',
   '/app-logo.png',
+  '/app-bot.js',
   'https://cdn.tailwindcss.com',
-  'https://s3.tradingview.com/tv.js',
+  'https://s3.tradingview.com/tv.js'
 ];
 self.addEventListener('install', e => {
   e.waitUntil(
