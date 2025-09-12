@@ -690,36 +690,39 @@
         navigator.serviceWorker.register('service-worker.js');
       });
     }
-    // PWA Install Prompt logic
-    let deferredPrompt, showInstallPrompt = false;
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      showInstallPrompt = true;
-      document.getElementById('installPrompt').classList.remove('hide');
-    });
-    document.getElementById('getMobileAppBtn').onclick = function() {
-      showInstallPrompt = true;
-      document.getElementById('installPrompt').classList.remove('hide');
-    };
-    document.getElementById('installNowBtn').onclick = async function() {
-      if (deferredPrompt) {
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        if (outcome === 'accepted') {
-          document.getElementById('installPrompt').classList.add('hide');
-          showInstallPrompt = false;
-        }
-      } else if (navigator.share) {
-        navigator.share({ title: "Install Blockchain Auto-Trading Bot", url: location.href });
-      } else {
-        alert("To install: Use your browser's menu and select 'Add to Home screen'.");
-      }
-    };
-    document.getElementById('maybeLaterBtn').onclick = function() {
-      showInstallPrompt = false;
-      document.getElementById('installPrompt').classList.add('hide');
-    };
+  // INSTALL PROMPT LOGIC (update)
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  show($('#installPrompt'));
+});
+
+$('#getMobileAppBtn').onclick = function() {
+  // If the prompt event is available, show it
+  if (deferredPrompt) {
+    show($('#installPrompt'));
+  } else {
+    // fallback instructions
+    alert("To install: Use your browser's menu and select 'Add to Home screen'.");
+  }
+};
+$('#installNowBtn').onclick = async function() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      hide($('#installPrompt'));
+      // Optional: Show a confirmation or animation
+      alert('App is being installed! You can now launch it from your home screen.');
+    }
+  } else {
+    alert("To install: Use your browser's menu and select 'Add to Home screen'.");
+  }
+};
+$('#maybeLaterBtn').onclick = function() {
+  hide($('#installPrompt'));
+};
   </script>
   <!-- MAIN APP SCRIPT -->
   <script src="app-bot.js"></script>
