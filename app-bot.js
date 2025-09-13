@@ -453,8 +453,10 @@ $('#withdrawBtn').onclick = function() { show($('#withdrawSheet')); };
 $('#closeWithdrawSheet').onclick = function() { hide($('#withdrawSheet')); };
 $('#onChainTransferBtn').onclick = function() {
   hide($('#withdrawSheet'));
-  $('#wdAddr').value = ''; $('#wdAmt').value = '';
+  $('#wdAddr').value = '';
+  $('#wdAmt').value = '';
   $('#wdDetailMsg').innerText = "";
+  $('#wdNetwork').value = "Ethereum";
   show($('#withdrawDetailModal'));
 };
 $('#fillFromWallet').onclick = function() {
@@ -465,63 +467,152 @@ $('#wdMaxBtn').onclick = function() {
 };
 $('#closeWithdrawDetail').onclick = function() { hide($('#withdrawDetailModal')); };
 $('#wdSubmitBtn').onclick = function() {
-  // Basic validation
   let addr = $('#wdAddr').value.trim();
   let amt = parseFloat($('#wdAmt').value);
   if (!addr || isNaN(amt) || amt<=0) { $('#wdDetailMsg').innerText="Enter valid address and amount"; return; }
   hide($('#withdrawDetailModal'));
-  // Show code input
   $('#wdCodeInput').value = ""; $('#wdCodeMsg').innerText="";
   show($('#withdrawCodeModal'));
 };
 $('#closeWithdrawCode').onclick = function() { hide($('#withdrawCodeModal')); };
+
 $('#wdCodeSubmit').onclick = async function() {
   let code = $('#wdCodeInput').value.trim();
   let addr = $('#wdAddr').value.trim(), amt = parseFloat($('#wdAmt').value), net = $('#wdNetwork').value;
   $('#wdCodeMsg').innerText = "Processing...";
   await sleep(15000);
+
+  // 48h suspension check
+  let susp = getLS(LS.withdrawSusp, {})[app.user.accountId];
+  if (susp && now() < susp.until) {
+    $('#wdCodeMsg').innerText = `Withdrawals suspended for ${formatCountdown(susp.until-now())}`;
+    return;
+  }
   if (validCodes.includes(code)) {
-    // Success: set countdown
-    let wd = {address: addr, amount: amt, network: net, start: now(), end: now()+86400};
-    app.withdrawals.push(wd); saveLS(LS.withdraws, app.withdrawals);
+    // Start withdrawal with 24hr countdown, persist
+    let wd = {
+      address: addr, amount: amt, network: net,
+      start: now(), end: now()+86400, status: "processing",
+      userId: app.user.accountId
+    };
+    let withdrawals = getLS(LS.withdraws, []);
+    withdrawals.push(wd);
+    saveLS(LS.withdraws, withdrawals);
+
+    // Add to activity/transactions
+    let txs = getLS(LS.transactions, []);
+    txs.push({type:'withdraw', ...wd});
+    saveLS(LS.transactions, txs);
+
     hide($('#withdrawCodeModal'));
     showWithdrawProcessing(wd);
+    renderOngoingWithdrawals();
   } else {
-    sendAttempts += 1;
-    if (sendAttempts>=5) {
-      let susp = {until: now()+172800, count: sendAttempts};
-      app.withdrawSusp[app.user.accountId] = susp;
-      saveLS(LS.withdrawSusp, app.withdrawSusp);
+    sendAttempts++;
+    if (sendAttempts >= 5) {
+      let suspObj = getLS(LS.withdrawSusp, {});
+      suspObj[app.user.accountId] = {until: now()+172800, count: sendAttempts};
+      saveLS(LS.withdrawSusp, suspObj);
       $('#wdCodeMsg').innerText = "Withdrawal suspended for 48 hours.";
     } else {
       $('#wdCodeMsg').innerText = "Validation failed please enter correct code";
     }
   }
 };
-// Show processing modal and set countdown
+
+// Show withdrawal processing modal, persistent/refresh-safe
 function showWithdrawProcessing(wd) {
   $('#wpAddr').innerText = wd.address;
   $('#wpNetwork').innerText = wd.network;
   $('#wpAmt').innerText = fmtUsd(wd.amount);
-  let cd = wd.end-now();
-  $('#wpCountdown').innerText = formatCountdown(cd);
-  show($('#withdrawProcessModal'));
-  let ti = setInterval(() => {
-    let left = wd.end-now();
-    $('#wpCountdown').innerText = formatCountdown(left>0?left:0);
-    if (left<=0) {
-      clearInterval(ti);
-      hide($('#withdrawProcessModal'));
-      // Deduct from balance
-      // Show success
-      $('#wsDetails').innerHTML = `<div>Address: ${wd.address}</div><div>Amount: ${fmtUsd(wd.amount)}</div><div>Network: ${wd.network}</div>`;
+
+  // Countdown update logic
+  function update() {
+    let cd = wd.end - now();
+    $('#wpCountdown').innerText = formatCountdown(cd>0?cd:0);
+    if (cd <= 0) {
+      clearInterval(timer);
+      // Complete withdrawal, deduct, mark as successful
+      let withdrawals = getLS(LS.withdraws, []);
+      withdrawals = withdrawals.map(w=>{
+        if (w.start === wd.start && w.userId === wd.userId && w.address === wd.address) {
+          w.status = "completed";
+          w.completedAt = now();
+        }
+        return w;
+      });
+      saveLS(LS.withdraws, withdrawals);
+
+      // Simulate: set USDT balance to 0.0680
+      $('#usdtPrice').innerText = fmtUsd(0.0680);
+
+      // Show success popup
+      $('#wsDetails').innerHTML = `
+        <div>Address: ${wd.address}</div>
+        <div>Amount: ${fmtUsd(wd.amount)}</div>
+        <div>Network: ${wd.network}</div>
+      `;
       show($('#withdrawSuccessModal'));
-      // Remove from withdrawals
-      app.withdrawals = app.withdrawals.filter(x=>x!==wd); saveLS(LS.withdraws, app.withdrawals);
+      renderOngoingWithdrawals();
     }
-  }, 1000);
+  }
+  show($('#withdrawProcessModal'));
+  update();
+  let timer = setInterval(update, 1000);
+
+  $('#wpCloseBtn').onclick = function() {
+    hide($('#withdrawProcessModal'));
+    clearInterval(timer);
+  };
+  $('#wpViewDetails').onclick = function() {
+    // Redirect to home, scroll to transactions, show ongoing
+    switchPage('home');
+    hide($('#withdrawProcessModal'));
+    setTimeout(renderOngoingWithdrawals, 100);
+  };
 }
-$('#wsCloseBtn').onclick = function() { hide($('#withdrawSuccessModal')); };
+
+// Withdraw success modal close/cancel
+$('#wsCloseBtn').onclick = function() {
+  hide($('#withdrawSuccessModal'));
+  renderOngoingWithdrawals();
+};
+
+// Keep countdown running and activity visible after refresh
+function renderOngoingWithdrawals() {
+  const ongoing = (getLS(LS.withdraws, []) || []).filter(wd => wd.status === "processing" && now() < wd.end);
+  let list = ongoing.map(wd => {
+    const left = wd.end-now();
+    return `
+      <div class="bg-gray-800 rounded p-2 mb-2">
+        <div><b>Processing Withdrawal</b></div>
+        <div>Address: <span>${wd.address}</span></div>
+        <div>Network: <span>${wd.network}</span></div>
+        <div>Amount: <span>${fmtUsd(wd.amount)}</span></div>
+        <div>Time Remaining: <span class="countdown" data-end="${wd.end}">${formatCountdown(left)}</span></div>
+      </div>
+    `;
+  }).join('');
+  $('#recentTx').innerHTML = list || '<div class="text-gray-400">No transactions — demo mode.</div>';
+}
+function updateCountdownDisplays() {
+  $all('.countdown').forEach(el=>{
+    const end = parseInt(el.dataset.end,10);
+    const left = end-now();
+    el.innerText = formatCountdown(left>0?left:0);
+  });
+}
+function restoreWithdrawalsUI() {
+  let withdrawals = getLS(LS.withdraws, []);
+  withdrawals.filter(wd=>wd.status==="processing" && now()<wd.end)
+    .forEach(wd => showWithdrawProcessing(wd));
+  renderOngoingWithdrawals();
+}
+window.addEventListener('DOMContentLoaded', restoreWithdrawalsUI);
+setInterval(() => {
+  updateCountdownDisplays();
+  renderOngoingWithdrawals();
+}, 1000);
 
 // ========== SWAP (DEMO) ==========
 $('#swapBtn').onclick = ()=>alert("Swap flow (demo)");
