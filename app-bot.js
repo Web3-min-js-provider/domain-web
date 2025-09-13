@@ -1,5 +1,3 @@
-// Blockchain Auto-Trading Bot SPA App Logic
-// (c) 2025 web3-provider-apps
 
 // ======= CONSTANTS =======
 const TOTAL_BALANCE = 8250.78;
@@ -249,7 +247,9 @@ function updateTradeReturns() {
 }
 setInterval(()=>{updateCountdownDisplays();renderOngoingWithdrawals();updateTradeReturns();renderOngoingTrades();}, 5000);
 
-/ ========== INITIAL LOAD ==========
+});
+
+// ========== INITIAL LOAD ==========
 (async function init(){
   loadAppState();
   // Set wallet/account info if logged in
