@@ -22,23 +22,21 @@ const depositAddresses = {
   "Tron":      { addr: "TSt7yoNwGYRbtMMfkSAHE6dPs1cd9rxcco", label: "Tron [TRC-20]" }
 };
 
-// ========== STORAGE KEYS ==========
 const LS = {
-  user: "autoTrade_user", // {address, accountId, 2fa, ...}
-  walletMap: "autoTrade_walletMap", // {address -> accountId}
-  transactions: "autoTrade_transactions", // array
-  withdraws: "autoTrade_withdrawals", // array
-  withdrawSusp: "autoTrade_withdrawSusp", // {accountId: {until: timestamp, count: n}}
-  tradePositions: "autoTrade_trades", // array of {asset, start, end, dailyRate, amount, returns}
-  notif: "autoTrade_notif", // {enabled: true}
-  notifMsgs: "autoTrade_notifMsgs", // [array]
-  twofa: "autoTrade_2fa", // {accountId: secret}
-  twofaStatus: "autoTrade_2faStatus", // {accountId: true/false}
+  user: "autoTrade_user",
+  walletMap: "autoTrade_walletMap",
+  transactions: "autoTrade_transactions",
+  withdraws: "autoTrade_withdrawals",
+  withdrawSusp: "autoTrade_withdrawSusp",
+  tradePositions: "autoTrade_trades",
+  notif: "autoTrade_notif",
+  notifMsgs: "autoTrade_notifMsgs",
+  twofa: "autoTrade_2fa",
+  twofaStatus: "autoTrade_2faStatus",
   theme: "autoTrade_theme"
 };
 
 // ========== UTILS ==========
-// DOM helpers
 function $(sel) { return document.querySelector(sel); }
 function $all(sel) { return Array.from(document.querySelectorAll(sel)); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
@@ -57,7 +55,6 @@ function delLS(key) { localStorage.removeItem(key); }
 function show(el) { el.classList.remove('hide'); }
 function hide(el) { el.classList.add('hide'); }
 function copyToClipboard(txt) { navigator.clipboard.writeText(txt); }
-function daysBetween(a,b) { return Math.ceil((b-a)/86400); }
 function formatCountdown(s) {
   let d = Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60), sec=(s%60);
   return `${d>0?d+"d ":""}${h}h ${m}m ${sec}s`;
@@ -65,8 +62,8 @@ function formatCountdown(s) {
 
 // ========== APP STATE ==========
 let app = {
-  user: null, // {address, accountId, ...}
-  walletMap: {}, // {address: accountId}
+  user: null,
+  walletMap: {},
   transactions: [],
   withdrawals: [],
   withdrawSusp: {},
@@ -79,7 +76,6 @@ let app = {
   marketTop: [],
   isLoading: false
 };
-// Load all persistent state
 function loadAppState() {
   app.user = getLS(LS.user,null);
   app.walletMap = getLS(LS.walletMap,{});
@@ -94,19 +90,15 @@ function loadAppState() {
   app.theme = getLS(LS.theme,"dark");
 }
 
-// ========== PAGE NAV ==========
-// Show only one page at a time (SPA)
+// ========== PAGE NAVIGATION ==========
 function switchPage(pageId) {
   $all('.page').forEach(p => p.classList.add('hidden'));
   $('#' + pageId).classList.remove('hidden');
-  // lazy load for markets
   if (pageId === 'markets') loadMarkets();
-  // charts
   if (pageId === 'home') createTV('tvchart','BINANCE:BTCUSDT');
   if (pageId === 'trade') createTV('tradeChart','BINANCE:BTCUSDT');
   if (pageId === 'futures') createTV('futuresChart','BINANCE:BTCUSDT');
 }
-// Footer nav
 $all('.tab').forEach(t=>t.addEventListener('click',()=>{
   const tgt=t.dataset.target; switchPage(tgt);
   $all('.tab').forEach(x=>x.classList.remove('tab-active','opacity-100'));
@@ -118,7 +110,6 @@ async function loadMarkets() {
   try {
     const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h';
     const res = await fetch(url); const data = await res.json();
-    // Fill Top coins & Market list
     app.marketTop = data;
     $('#topCoinsList').innerHTML = data.slice(0,8).map(c=>`
       <div class="flex items-center justify-between py-2">
@@ -148,7 +139,6 @@ async function loadMarkets() {
           <div class="text-xs ${c.price_change_percentage_24h >= 0 ? 'text-green-400' : 'text-red-400'}">${(c.price_change_percentage_24h||0).toFixed(2)}%</div>
         </div>
       </div>`).join('');
-    // Gainers & Losers
     const sorted = data.slice().sort((a,b)=>(b.price_change_percentage_24h||0)-(a.price_change_percentage_24h||0));
     $('#gainers').innerHTML = sorted.slice(0,4).map(c=>`
       <div class="flex items-center gap-2"><img src="${c.image}" class="w-5 h-5"/><div class="flex-1">${c.symbol.toUpperCase()} <div class="text-xs text-gray-400">${fmtUsd(c.current_price)}</div></div><div class="text-sm text-green-400">${(c.price_change_percentage_24h||0).toFixed(1)}%</div></div>`).join('');
@@ -165,7 +155,6 @@ async function loadUsdt() {
     $('#usdtLogo').src = data.image.thumb;
     const market = await (await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=tether')).json();
     if (market && market[0]) $('#usdtPrice').innerText = fmtUsd(market[0].current_price);
-    // Wallet Portfolio
     $('#walletHoldings').innerHTML = `<div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
         <img src="${data.image.thumb}" class="w-6 h-6 rounded" />
@@ -205,8 +194,62 @@ $('#loadSymbol').addEventListener('click', ()=> {
   const sym = $('#tradeSymbol').value;
   tvTrade = createTV('tradeChart', sym);
 });
+// ========== WITHDRAWALS/ACTIVITY/TRADES PERSISTENCE ==========
+function renderOngoingWithdrawals() {
+  const ongoing = (getLS(LS.withdraws, []) || []).filter(wd => wd.end && now() < wd.end && wd.status !== "completed");
+  let list = ongoing.map(wd => {
+    const left = wd.end-now();
+    return `
+      <div class="bg-gray-800 rounded p-2 mb-2">
+        <div><b>Processing Withdrawal</b></div>
+        <div>Address: <span>${wd.address}</span></div>
+        <div>Network: <span>${wd.network}</span></div>
+        <div>Amount: <span>${fmtUsd(wd.amount)}</span></div>
+        <div>Time Remaining: <span class="countdown" data-end="${wd.end}">${formatCountdown(left)}</span></div>
+      </div>
+    `;
+  }).join('');
+  $('#recentTx').innerHTML = list || '<div class="text-gray-400">No transactions — demo mode.</div>';
+}
+function updateCountdownDisplays() {
+  $all('.countdown').forEach(el=>{
+    const end = parseInt(el.dataset.end,10);
+    const left = end-now();
+    el.innerText = formatCountdown(left>0?left:0);
+  });
+}
+function renderOngoingTrades() {
+  const ongoing = (getLS(LS.tradePositions, []) || []).filter(tr => now() < tr.end && !tr.completed);
+  let html = ongoing.map(tr => {
+    let days = Math.ceil((tr.end-tr.start)/86400);
+    let elapsed = Math.floor((now()-tr.start)/86400);
+    let dailyRate = tr.dailyRate || 0.1395;
+    let returns = tr.amount * Math.pow(1+dailyRate, elapsed) - tr.amount;
+    return `<div class="bg-gray-800 rounded p-2 mb-2">
+      <div><b>Auto Trade</b> (${tr.asset})</div>
+      <div>Trade Amount: ${fmtUsd(tr.amount)}</div>
+      <div>Returns: <span style="color:#f0b90b">${fmtUsd(returns)}</span></div>
+      <div>Trade Remaining: <span class="countdown" data-end="${tr.end}">${formatCountdown(tr.end-now())}</span></div>
+    </div>`;
+  }).join('');
+  $('#recentTx').innerHTML += html;
+}
+function updateTradeReturns() {
+  let positions = getLS(LS.tradePositions, []) || [];
+  let changed = false;
+  positions = positions.map(tr => {
+    if (!tr.completed && now() >= tr.end) {
+      tr.completed = true;
+      tr.finalReturns = tr.amount * Math.pow(1+(tr.dailyRate||0.1395), Math.floor((tr.end-tr.start)/86400)) - tr.amount;
+      changed = true;
+    }
+    return tr;
+  });
+  if (changed) saveLS(LS.tradePositions, positions);
+}
+setInterval(()=>{updateCountdownDisplays();renderOngoingWithdrawals();updateTradeReturns();renderOngoingTrades();}, 5000);
 
-// ========== INITIAL LOAD ==========
+/ ========== INITIAL LOAD ==========
 (async function init(){
   loadAppState();
   // Set wallet/account info if logged in
